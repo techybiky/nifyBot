@@ -14,7 +14,6 @@ class NewsProcessor {
   async fetchNews() {
     const allNews = [];
 
-    // Try NewsAPI if key is available
     if (this.newsApiKey) {
       try {
         const newsApiNews = await this.fetchFromNewsAPI();
@@ -24,7 +23,6 @@ class NewsProcessor {
       }
     }
 
-    // Fallback to free RSS feeds / web scraping
     try {
       const rssNews = await this.fetchFromFreeSource();
       allNews.push(...rssNews);
@@ -32,7 +30,6 @@ class NewsProcessor {
       console.log('Free source fetch failed:', error.message);
     }
 
-    // Filter and deduplicate
     return this.filterAndDeduplicate(allNews);
   }
 
@@ -41,7 +38,7 @@ class NewsProcessor {
    */
   async fetchFromNewsAPI() {
     const query = 'nifty OR sensex OR "indian stock market" OR "bse" OR "nse"';
-    
+
     try {
       const response = await axios.get('https://newsapi.org/v2/everything', {
         params: {
@@ -72,9 +69,6 @@ class NewsProcessor {
    * Fetch from free sources (RBI, BSE, NSE official news)
    */
   async fetchFromFreeSource() {
-    const news = [];
-
-    // Simulated recent news (in production, you'd scrape these or use free RSS)
     const recentNews = [
       {
         title: 'RBI maintains repo rate, supports growth',
@@ -106,25 +100,75 @@ class NewsProcessor {
   }
 
   /**
-   * Analyze sentiment of news articles
+   * Analyze sentiment of news articles.
+   *
+   * TWO-LAYER APPROACH:
+   * 1. AFINN general-purpose scoring (existing library) - catches everyday
+   *    positive/negative language.
+   * 2. Finance-specific keyword scoring - AFINN doesn't understand market
+   *    vocabulary (e.g. "correct", "booking", "sharply" don't register as
+   *    negative in general English, even though "markets correct sharply on
+   *    profit booking" is bearish). This layer adds/subtracts points for
+   *    market-specific bullish/bearish terms, then combines with AFINN.
+   *
+   * THRESHOLD NOTE: also lowered from ±5 to ±2 (symmetric), since even with
+   * the finance layer, scores tend to be smaller in magnitude than generic
+   * AFINN text.
    */
   analyzeNews(newsArray) {
+    const POSITIVE_THRESHOLD = 2;
+    const NEGATIVE_THRESHOLD = -2;
+
+    const BEARISH_TERMS = [
+      'crash', 'crashes', 'crashed', 'plunge', 'plunges', 'plunged',
+      'tumble', 'tumbles', 'tumbled', 'slump', 'slumps', 'slumped',
+      'sell-off', 'selloff', 'sell off', 'correction', 'correct', 'corrects', 'corrected',
+      'decline', 'declines', 'declined', 'fall', 'falls', 'fell', 'falling',
+      'drop', 'drops', 'dropped', 'slide', 'slides', 'slid',
+      'bearish', 'weak', 'weakness', 'losses', 'loss', 'red',
+      'profit booking', 'panic', 'sell pressure', 'selling pressure',
+      'downgrade', 'downgraded', 'recession', 'slowdown', 'contraction',
+    ];
+
+    const BULLISH_TERMS = [
+      'rally', 'rallies', 'rallied', 'surge', 'surges', 'surged',
+      'soar', 'soars', 'soared', 'jump', 'jumps', 'jumped',
+      'gain', 'gains', 'gained', 'rise', 'rises', 'risen', 'rising',
+      'bullish', 'strong', 'strength', 'record high', 'all-time high',
+      'upgrade', 'upgraded', 'boost', 'boosted', 'recovery', 'rebound',
+      'green', 'outperform', 'beat estimates', 'buying', 'buy pressure',
+    ];
+
+    const scoreFinanceTerms = (text) => {
+      const lower = text.toLowerCase();
+      let score = 0;
+      for (const term of BEARISH_TERMS) {
+        if (lower.includes(term)) score -= 2;
+      }
+      for (const term of BULLISH_TERMS) {
+        if (lower.includes(term)) score += 2;
+      }
+      return score;
+    };
+
     return newsArray.map(article => {
       const fullText = `${article.title} ${article.description || ''} ${article.content || ''}`;
-      
-      // Sentiment analysis
-      const sentimentScore = this.sentiment.analyze(fullText);
-      
-      // Classify sentiment
+
+      const afinnResult = this.sentiment.analyze(fullText);
+      const financeScore = scoreFinanceTerms(fullText);
+      const combinedScore = afinnResult.score + financeScore;
+
       let sentiment = 'neutral';
-      if (sentimentScore.score > 5) sentiment = 'positive';
-      if (sentimentScore.score < -5) sentiment = 'negative';
+      if (combinedScore > POSITIVE_THRESHOLD) sentiment = 'positive';
+      if (combinedScore < NEGATIVE_THRESHOLD) sentiment = 'negative';
 
       return {
         ...article,
         sentiment,
-        sentimentScore: sentimentScore.score,
-        sentimentComparative: sentimentScore.comparative
+        sentimentScore: combinedScore,
+        sentimentComparative: afinnResult.comparative,
+        _afinnScore: afinnResult.score,
+        _financeScore: financeScore,
       };
     });
   }
@@ -138,7 +182,6 @@ class NewsProcessor {
       return this.keywords.some(keyword => fullText.includes(keyword));
     });
 
-    // Deduplicate by title
     const uniqueNews = [];
     const titles = new Set();
 
@@ -150,7 +193,7 @@ class NewsProcessor {
       }
     }
 
-    return uniqueNews.slice(0, 100); // Limit to 100 most recent
+    return uniqueNews.slice(0, 100);
   }
 
   /**

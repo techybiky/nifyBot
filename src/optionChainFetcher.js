@@ -56,4 +56,60 @@ async function getFullOptionChain(indexSymbol, expiry) {
   return chain.records; // { expiryDates, data, timestamp, underlyingValue, strikePrices }
 }
 
-module.exports = { getRealOptionPremium, getFullOptionChain };
+/**
+ * Fetch the full option chain for an individual STOCK (not index).
+ * IMPORTANT: the equity option chain response shape is DIFFERENT from the
+ * index one - it's a flat array where each item already represents one
+ * specific strike+optionType combination, rather than nested CE/PE objects
+ * per strike. strikePrice also comes back as a STRING, not a number.
+ * @param {string} symbol - e.g. 'RELIANCE'
+ * @returns {Promise<{expiryDates: string[], underlyingValue: number, data: object[]}>}
+ *          normalized to a similar shape as getFullOptionChain for convenience
+ */
+async function getFullEquityOptionChain(symbol) {
+  const chain = await nseIndia.getEquityOptionChain(symbol);
+
+  if (!chain || !Array.isArray(chain.data) || chain.data.length === 0) {
+    throw new Error(`NSE returned no usable equity option chain for ${symbol} (may not be F&O-eligible)`);
+  }
+
+  // Normalize: parse strikePrice to number, and derive expiryDates + underlyingValue
+  const normalizedData = chain.data.map((item) => ({
+    ...item,
+    strikePrice: parseFloat(item.strikePrice),
+  }));
+
+  const expiryDates = [...new Set(normalizedData.map((item) => item.expiryDate))];
+  const underlyingValue = normalizedData[0]?.underlyingValue ?? null;
+
+  return {
+    expiryDates,
+    underlyingValue,
+    data: normalizedData,
+  };
+}
+
+/**
+ * Find the real premium for a specific stock strike, matching the FLAT
+ * equity chain shape (optionType is a field on each row, not a nested key).
+ * @param {object[]} normalizedData - from getFullEquityOptionChain().data
+ * @param {number} strikePrice
+ * @param {'CE'|'PE'} optionType
+ * @param {string} expiryDate - must match one of the real expiryDates exactly
+ */
+function findEquityOptionMatch(normalizedData, strikePrice, optionType, expiryDate) {
+  // NSE equity chains may label option type as 'CE'/'PE' OR 'Call'/'Put' -
+  // match defensively on the first letter, case-insensitive.
+  const wantsCall = optionType.toUpperCase().startsWith('C');
+
+  return normalizedData.find((item) => {
+    const itemIsCall = String(item.optionType).toUpperCase().startsWith('C');
+    return (
+      item.strikePrice === strikePrice &&
+      item.expiryDate === expiryDate &&
+      itemIsCall === wantsCall
+    );
+  });
+}
+
+module.exports = { getRealOptionPremium, getFullOptionChain, getFullEquityOptionChain, findEquityOptionMatch };

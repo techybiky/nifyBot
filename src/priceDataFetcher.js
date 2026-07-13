@@ -19,7 +19,7 @@ const nseIndia = new NseIndia();
  *                         covers the 35+ trading days needed for MACD/SMA50)
  * @returns {Promise<number[]>} closing prices sorted oldest to newest
  */
-async function getHistoricalCloses(indexName = 'NIFTY 50', days = 90) {
+async function getHistoricalCloses(indexName = 'NIFTY 50', days = 90, symbolType = 'Index') {
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - days);
@@ -28,7 +28,7 @@ async function getHistoricalCloses(indexName = 'NIFTY 50', days = 90) {
     indexName,
     { start, end },
     undefined,   // token - auto-fetched internally
-    'Index',     // symbolType
+    symbolType,     // symbolType
     'D',         // chartType - Daily
   );
 
@@ -47,7 +47,7 @@ async function getHistoricalCloses(indexName = 'NIFTY 50', days = 90) {
  * live/latest session or a stale prior close.
  * @returns {Promise<{closes: number[], lastDate: Date}>}
  */
-async function getHistoricalClosesWithDate(indexName = 'NIFTY 50', days = 90) {
+async function getHistoricalClosesWithDate(indexName = 'NIFTY 50', days = 90, symbolType = 'Index') {
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - days);
@@ -56,7 +56,7 @@ async function getHistoricalClosesWithDate(indexName = 'NIFTY 50', days = 90) {
     indexName,
     { start, end },
     undefined,
-    'Index',
+    symbolType,
     'D',
   );
 
@@ -86,7 +86,7 @@ async function getHistoricalClosesWithDate(indexName = 'NIFTY 50', days = 90) {
  *                  meaningful weekly SMA10/SMA20 trend read)
  * @returns {Promise<{dailyCloses: number[], weeklyCloses: number[]}>}
  */
-async function getMultiTimeframeCloses(indexName = 'NIFTY 50', dailyDays = 90, weeklyLookbackDays = 450) {
+async function getMultiTimeframeCloses(indexName = 'NIFTY 50', dailyDays = 90, weeklyLookbackDays = 450, symbolType = 'Index') {
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - weeklyLookbackDays);
@@ -95,7 +95,7 @@ async function getMultiTimeframeCloses(indexName = 'NIFTY 50', dailyDays = 90, w
     indexName,
     { start, end },
     undefined,
-    'Index',
+    symbolType,
     'D',
   );
 
@@ -133,4 +133,4 @@ function getIsoWeekKey(date) {
   return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
 }
 
-module.exports = { getHistoricalCloses, getHistoricalClosesWithDate, getMultiTimeframeCloses };
+module.exports = { getHistoricalCloses, getHistoricalClosesWithDate, getMultiTimeframeCloses }; 

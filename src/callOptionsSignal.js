@@ -107,18 +107,18 @@ class CallOptionsSignal {
    * @param {number} currentPrice - Current index price
    * @returns {object} Option signal (call, put, or no-action)
    */
-  static generateOptionSignal(technicalAnalysis, sentimentAnalysis, currentPrice) {
+  static generateOptionSignal(technicalAnalysis, sentimentAnalysis, currentPrice, underlyingSymbol = "NIFTY") {
     const bullishAgreement =
       technicalAnalysis.signal === "BUY" && sentimentAnalysis.score > 0.3;
     const bearishAgreement =
       technicalAnalysis.signal === "SELL" && sentimentAnalysis.score < -0.3;
 
     if (bullishAgreement) {
-      return this.generateCallOptionSignal(technicalAnalysis, sentimentAnalysis, currentPrice);
+      return this.generateCallOptionSignal(technicalAnalysis, sentimentAnalysis, currentPrice, underlyingSymbol);
     }
 
     if (bearishAgreement) {
-      return this.generatePutOptionSignal(technicalAnalysis, sentimentAnalysis, currentPrice);
+      return this.generatePutOptionSignal(technicalAnalysis, sentimentAnalysis, currentPrice, underlyingSymbol);
     }
 
     return {
@@ -130,7 +130,7 @@ class CallOptionsSignal {
   /**
    * Generate call option buy signal
    */
-  static generateCallOptionSignal(technicalAnalysis, sentimentAnalysis, currentPrice) {
+  static generateCallOptionSignal(technicalAnalysis, sentimentAnalysis, currentPrice, underlyingSymbol = "NIFTY") {
     const shouldBuyCall =
       technicalAnalysis.signal === "BUY" && sentimentAnalysis.score > 0.3;
 
@@ -142,7 +142,7 @@ class CallOptionsSignal {
     }
 
     const strikePrice = this.getNearestOTMCallStrike(currentPrice);
-    const callSymbol = this.generateOptionSymbol("NIFTY", strikePrice, null, "CE");
+    const callSymbol = this.generateOptionSymbol(underlyingSymbol, strikePrice, null, "CE");
 
     const daysToExpiry = 7;
     const volatility = technicalAnalysis.confidence / 100;
@@ -152,15 +152,13 @@ class CallOptionsSignal {
       (technicalAnalysis.confidence + sentimentAnalysis.confidence) / 2
     ).toFixed(2);
 
-    // FIX: target/stop-loss are now premium-based (same unit as estimatedPremium),
-    // not mixed with the index-level strikePrice as before.
-    const targetPremium = estimatedPremium * 1.15; // +15% take-profit on premium
-    const stopLossPremium = estimatedPremium * 0.9; // -10% stop-loss on premium
+    const targetPremium = estimatedPremium * 1.15;
+    const stopLossPremium = estimatedPremium * 0.9;
 
     return {
       action: "BUY_CALL",
       symbol: callSymbol,
-      indexName: "NIFTY",
+      indexName: underlyingSymbol,
       currentPrice: parseFloat(currentPrice.toFixed(2)),
       strikePrice,
       expiryDate: this.getWeeklyExpiry(),
@@ -183,7 +181,7 @@ class CallOptionsSignal {
   /**
    * Generate put option buy signal (bearish trade)
    */
-  static generatePutOptionSignal(technicalAnalysis, sentimentAnalysis, currentPrice) {
+  static generatePutOptionSignal(technicalAnalysis, sentimentAnalysis, currentPrice, underlyingSymbol = "NIFTY") {
     const shouldBuyPut =
       technicalAnalysis.signal === "SELL" && sentimentAnalysis.score < -0.3;
 
@@ -195,7 +193,7 @@ class CallOptionsSignal {
     }
 
     const strikePrice = this.getNearestOTMPutStrike(currentPrice);
-    const putSymbol = this.generateOptionSymbol("NIFTY", strikePrice, null, "PE");
+    const putSymbol = this.generateOptionSymbol(underlyingSymbol, strikePrice, null, "PE");
 
     const daysToExpiry = 7;
     const volatility = technicalAnalysis.confidence / 100;
@@ -211,7 +209,7 @@ class CallOptionsSignal {
     return {
       action: "BUY_PUT",
       symbol: putSymbol,
-      indexName: "NIFTY",
+      indexName: underlyingSymbol,
       currentPrice: parseFloat(currentPrice.toFixed(2)),
       strikePrice,
       expiryDate: this.getWeeklyExpiry(),

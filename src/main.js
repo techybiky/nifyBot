@@ -10,6 +10,8 @@ const RiskManager = require("./riskManager");
 const GrowwTrader = require("./growwTrader");
 const { getMultiTimeframeCloses } = require("./priceDataFetcher");
 const { getRealOptionPremium } = require("./optionChainFetcher");
+const { analyzeStockBatch } = require("./stockOptionsAnalyzer");
+const { getStockBatch } = require("./fnoStockList");
 const fs = require("fs");
 const path = require("path");
 
@@ -227,10 +229,37 @@ async function main() {
     }
 
     // ==========================================
+    // PHASE 6B: F&O Stock Options Scan
+    // Rotates through the F&O stock universe in batches (based on current
+    // hour) so the full list gets covered across the day's runs, rather than
+    // hammering NSE with all ~45+ stocks every single run.
+    // ==========================================
+    log("\n📈 PHASE 6B: Scanning F&O stocks for option signals...");
+
+    let stockSignals = [];
+    try {
+      const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+      const hourIST = nowIST.getHours();
+      const stockBatch = getStockBatch(10, hourIST);
+      log(`  Scanning batch: ${stockBatch.map((s) => s.symbol).join(', ')}`);
+
+      const allStockResults = await analyzeStockBatch(stockBatch, analyzedNews, 500);
+      stockSignals = allStockResults.filter((r) => r.action === "BUY_CALL" || r.action === "BUY_PUT");
+
+      log(`  ✅ Scanned ${allStockResults.length} stocks, found ${stockSignals.length} actionable signal(s)`);
+      stockSignals.forEach((s) => {
+        log(`    ${s.action === "BUY_PUT" ? "🔻" : "📈"} ${s.symbol}: ${s.action} (strike ₹${s.strikePrice}, premium ₹${s.estimatedPremium}, ${s.premiumSource})`);
+      });
+    } catch (error) {
+      log(`  ⚠️ Stock scan failed: ${error.message}`);
+    }
+
+    // ==========================================
     // PHASE 7: Risk Management
     // ==========================================
     log("\n⚠️ PHASE 7: Risk Management Validation...");
     log("\n" + riskManager.formatRiskParameters());
+
 
     let tradeApproved = false;
     const isActionableSignal = callSignal.action === "BUY_CALL" || callSignal.action === "BUY_PUT";
@@ -313,16 +342,27 @@ async function main() {
 
     // ==========================================
     // PHASE 10: Send Telegram Alerts
-    // ONLY sends when there's an actual actionable CALL/PUT signal - routine
-    // HOLD/NO_ACTION runs are logged locally but don't spam the channel.
+    // ONLY sends when there's an actual actionable CALL/PUT signal (NIFTY or
+    // stock) - routine HOLD/NO_ACTION runs are logged locally but don't spam
+    // the channel.
     // ==========================================
-    if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
-      if (isActionableSignal) {
-        log("\n📱 PHASE 10: Sending Telegram alert (actionable signal found)...");
+    const hasAnyActionableSignal = isActionableSignal || stockSignals.length > 0;
 
-        const callAlert = CallOptionsSignal.formatCallOptionMessage(callSignal);
-        await telegramAlert.sendAlert(callAlert);
-        log("✅ Option alert sent");
+    if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
+      if (hasAnyActionableSignal) {
+        log("\n📱 PHASE 10: Sending Telegram alert(s) (actionable signal(s) found)...");
+
+        if (isActionableSignal) {
+          const callAlert = CallOptionsSignal.formatCallOptionMessage(callSignal);
+          await telegramAlert.sendAlert(callAlert);
+          log("✅ NIFTY option alert sent");
+        }
+
+        for (const stockSignal of stockSignals) {
+          const stockAlert = CallOptionsSignal.formatCallOptionMessage(stockSignal);
+          await telegramAlert.sendAlert(stockAlert);
+          log(`✅ Stock option alert sent: ${stockSignal.symbol}`);
+        }
       } else {
         log("\n📱 PHASE 10: No actionable signal this run - skipping Telegram (avoids channel spam)");
       }
@@ -342,6 +382,7 @@ async function main() {
     log(`  Sentiment: ${sentimentSummary.score > 0 ? "BULLISH" : "BEARISH"}`);
     log(`  Technical Signal: ${technicalAnalysis.signal || "NEUTRAL"}`);
     log(`  Option Signal: ${isActionableSignal ? (callSignal.action === "BUY_PUT" ? "🔻 PUT" : "✅ CALL") : "⏸️ NO ACTION"}`);
+    log(`  Stock Signals Found: ${stockSignals.length}`);
     log(`  Order Status: ${orderResult?.success ? "✅ PLACED" : "⏸️ NOT PLACED"}`);
     log(`  Daily Loss: ₹${riskManager.todayLoss}/${riskManager.maxDailyLoss}`);
     log(`  Telegram Alerts: Sent`);

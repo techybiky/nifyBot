@@ -313,33 +313,19 @@ async function main() {
 
     // ==========================================
     // PHASE 10: Send Telegram Alerts
+    // ONLY sends when there's an actual actionable CALL/PUT signal - routine
+    // HOLD/NO_ACTION runs are logged locally but don't spam the channel.
     // ==========================================
     if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
-      log("\n📱 PHASE 10: Sending Telegram alerts...");
-
-      await telegramAlert.sendAlert(niftySignal, "NIFTY");
-      log("✅ NIFTY alert sent");
-
-      await telegramAlert.sendAlert(sensexSignal, "SENSEX");
-      log("✅ SENSEX alert sent");
-
       if (isActionableSignal) {
+        log("\n📱 PHASE 10: Sending Telegram alert (actionable signal found)...");
+
         const callAlert = CallOptionsSignal.formatCallOptionMessage(callSignal);
         await telegramAlert.sendAlert(callAlert);
         log("✅ Option alert sent");
+      } else {
+        log("\n📱 PHASE 10: No actionable signal this run - skipping Telegram (avoids channel spam)");
       }
-
-      await telegramAlert.sendFullSummary({
-        newsCount: analyzedNews.length,
-        sentimentLabel: sentimentSummary.score > 0 ? "BULLISH" : "BEARISH",
-        sentimentScore: sentimentSummary.score,
-        technicalAnalysis: technicalAnalysis,
-        optionSignal: callSignal,
-        orderResult: orderResult,
-      });
-      log("✅ Full summary sent");
-
-      log("✅ Alerts sent");
     } else {
       log("\n⚠️ Telegram not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)");
     }

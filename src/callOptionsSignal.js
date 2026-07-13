@@ -333,34 +333,42 @@ class CallOptionsSignal {
   }
 
   /**
-   * Format an option signal (call or put) for display
+   * Format an option signal (call or put) for display.
+   * Includes a permanent educational-use disclaimer, since this may be
+   * shared to a public Telegram channel/group.
    */
   static formatCallOptionMessage(optionSignal) {
     if (optionSignal.action === "NO_ACTION") {
-      return `⏸️ NO OPTION SIGNAL\nReason: ${optionSignal.reason}`;
+      return `⏸️ <b>NO OPTION SIGNAL</b>\nReason: ${optionSignal.reason}`;
     }
 
-    const emoji = optionSignal.action === "BUY_PUT" ? "🔻" : "📞";
-    const label = optionSignal.action === "BUY_PUT" ? "PUT OPTION BUY SIGNAL" : "CALL OPTION BUY SIGNAL";
+    const isPut = optionSignal.action === "BUY_PUT";
+    const emoji = isPut ? "🔻" : "📈";
+    const label = isPut ? "PUT (Bearish)" : "CALL (Bullish)";
+    const premiumTag = optionSignal.premiumSource === "LIVE_MARKET" ? "Live Market Price" : "Estimated (theoretical)";
 
     return `
-${emoji} ${label}
+${emoji} <b>${label} Signal — ${optionSignal.indexName}</b>
 
-Symbol: ${optionSignal.symbol}
-Expiry: ${optionSignal.expiryDate}
-Strike: ₹${optionSignal.strikePrice}
-Current Price: ₹${optionSignal.currentPrice}
+<b>Symbol:</b> <code>${optionSignal.symbol}</code>
+<b>Strike:</b> ₹${optionSignal.strikePrice}  |  <b>Expiry:</b> ${optionSignal.expiryDate}
+<b>Spot Price:</b> ₹${optionSignal.currentPrice}
 
-💰 Estimated Premium: ₹${optionSignal.estimatedPremium}
-Target (premium): ₹${optionSignal.targetPrice}
-Stop Loss (premium): ₹${optionSignal.stopLoss}
+💰 <b>Premium:</b> ₹${optionSignal.estimatedPremium} <i>(${premiumTag})</i>
+🎯 <b>Target:</b> ₹${optionSignal.targetPrice}
+🛑 <b>Stop Loss:</b> ₹${optionSignal.stopLoss}
 
-📊 Confidence: ${optionSignal.confidence}%
-Technical: ${optionSignal.technicalSignal} (${optionSignal.technicalConfidence}%)
-Sentiment: ${optionSignal.sentimentScore.toFixed(2)} (${optionSignal.sentimentConfidence}%)
+📊 <b>Confidence:</b> ${optionSignal.confidence}%
+   • Technical: ${optionSignal.technicalSignal} (${optionSignal.technicalConfidence}%)
+   • Sentiment: ${optionSignal.sentimentScore.toFixed(2)} (${optionSignal.sentimentConfidence}%)
 
-✅ Reasons:
+<b>Basis:</b>
 ${optionSignal.reasons.map((r) => `• ${r}`).join("\n")}
+
+<i>🕐 ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST</i>
+
+━━━━━━━━━━━━━━━━━━━━
+⚠️ <b>Disclaimer:</b> This is an automated, algorithm-generated signal shared for educational and informational purposes only. It is NOT investment advice. The author is not a SEBI-registered Investment Adviser or Research Analyst. Trading in futures & options carries a high risk of financial loss and is not suitable for all investors. Past performance of this or any strategy does not guarantee future results. Please consult a SEBI-registered financial advisor and conduct your own due diligence before making any investment decision. Trade at your own risk.
     `.trim();
   }
 }

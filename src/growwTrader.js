@@ -161,6 +161,7 @@ class GrowwTrader {
         url: `${API_URL}${endpoint}`,
         headers: {
           Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
           'Content-Type': 'application/json',
           'X-API-VERSION': '1.0',
         },

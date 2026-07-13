@@ -6,17 +6,30 @@ class CallOptionsSignal {
    * Get weekly expiry date (next Thursday)
    * @returns {string} Date in DDMMMYY format (e.g., 18JUL26)
    */
-  static getWeeklyExpiry() {
+  /**
+   * Get weekly expiry date for a given index.
+   * IMPORTANT: Since 1 September 2025, SEBI mandated exchange-specific expiry
+   * days as part of weekly-derivatives rationalization:
+   *   - NIFTY 50 (NSE) weekly options expire on TUESDAY (previously Thursday)
+   *   - SENSEX (BSE) weekly options expire on THURSDAY
+   * If the computed day is an exchange holiday, expiry shifts to the previous
+   * working day — that holiday-shift logic is NOT implemented here yet, since
+   * it requires an exchange holiday calendar; keep that in mind near holidays.
+   * @param {string} indexName - 'NIFTY' or 'SENSEX'
+   * @returns {string} Date in DDMMMYY format (e.g., 14JUL26)
+   */
+  static getWeeklyExpiry(indexName = "NIFTY") {
+    const targetDay = indexName.toUpperCase() === "SENSEX" ? 4 : 2; // Thu=4, Tue=2
     const today = new Date();
     const dayOfWeek = today.getDay();
 
-    let daysUntilThursday = 4 - dayOfWeek;
-    if (daysUntilThursday <= 0) {
-      daysUntilThursday += 7;
+    let daysUntilTarget = targetDay - dayOfWeek;
+    if (daysUntilTarget <= 0) {
+      daysUntilTarget += 7;
     }
 
     const expiryDate = new Date(today);
-    expiryDate.setDate(expiryDate.getDate() + daysUntilThursday);
+    expiryDate.setDate(expiryDate.getDate() + daysUntilTarget);
 
     const day = String(expiryDate.getDate()).padStart(2, "0");
     const months = [
@@ -32,7 +45,7 @@ class CallOptionsSignal {
   /**
    * Get nearest OTM strike for a CALL (strike above current price)
    */
-  static getNearestOTMCallStrike(currentPrice, strikeInterval = 100) {
+  static getNearestOTMCallStrike(currentPrice, strikeInterval = 50) {
     const baseStrike = Math.ceil(currentPrice / strikeInterval) * strikeInterval;
     return baseStrike + strikeInterval;
   }
@@ -40,7 +53,7 @@ class CallOptionsSignal {
   /**
    * Get nearest OTM strike for a PUT (strike below current price)
    */
-  static getNearestOTMPutStrike(currentPrice, strikeInterval = 100) {
+  static getNearestOTMPutStrike(currentPrice, strikeInterval = 50) {
     const baseStrike = Math.floor(currentPrice / strikeInterval) * strikeInterval;
     return baseStrike - strikeInterval;
   }
@@ -48,14 +61,14 @@ class CallOptionsSignal {
   /**
    * Backwards-compatible alias (existing code may still call this name for calls)
    */
-  static getNearestOTMStrike(currentPrice, strikeInterval = 100) {
+  static getNearestOTMStrike(currentPrice, strikeInterval = 50) {
     return this.getNearestOTMCallStrike(currentPrice, strikeInterval);
   }
 
   /**
    * Get ATM (At The Money) strike
    */
-  static getATMStrike(currentPrice, strikeInterval = 100) {
+  static getATMStrike(currentPrice, strikeInterval = 50) {
     return Math.round(currentPrice / strikeInterval) * strikeInterval;
   }
 

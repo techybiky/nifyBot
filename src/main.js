@@ -8,9 +8,10 @@ const TechnicalIndicators = require("./technicalIndicators");
 const CallOptionsSignal = require("./callOptionsSignal");
 const RiskManager = require("./riskManager");
 const GrowwTrader = require("./growwTrader");
+const { getMultiTimeframeCloses } = require("./priceDataFetcher");
+const { getRealOptionPremium } = require("./optionChainFetcher");
 const fs = require("fs");
 const path = require("path");
-const { getHistoricalCloses } = require("./priceDataFetcher");
 
 require("dotenv").config();
 
@@ -21,12 +22,23 @@ function log(message) {
   const logMessage = `[${timestamp}] ${message}`;
   console.log(logMessage);
 
-  // Ensure logs directory exists
   if (!fs.existsSync("logs")) {
     fs.mkdirSync("logs", { recursive: true });
   }
 
   fs.appendFileSync(LOG_FILE, logMessage + "\n");
+}
+
+/**
+ * Convert our internal expiry format ("14JUL26") to NSE's expected format
+ * ("14-Jul-2026") for option chain lookups.
+ */
+function toNseExpiryFormat(internalExpiry) {
+  const day = internalExpiry.slice(0, 2);
+  const monAbbr = internalExpiry.slice(2, 5);
+  const monProper = monAbbr.charAt(0) + monAbbr.slice(1).toLowerCase();
+  const year = "20" + internalExpiry.slice(5, 7);
+  return `${day}-${monProper}-${year}`;
 }
 
 async function main() {
@@ -76,34 +88,19 @@ async function main() {
     const analyzedNews = newsProcessor.analyzeNews(newsData);
     log(`✅ Analyzed ${analyzedNews.length} articles`);
 
-    // // Calculate sentiment summary
-    // const sentimentScores = analyzedNews.map((n) => n.sentiment);
-    // const avgSentiment =
-    //   sentimentScores.reduce((a, b) => a + b, 0) / sentimentScores.length;
+    const positive = analyzedNews.filter((a) => a.sentiment === "positive").length;
+    const negative = analyzedNews.filter((a) => a.sentiment === "negative").length;
+    const neutral = analyzedNews.filter((a) => a.sentiment === "neutral").length;
 
-    const positive = analyzedNews.filter(
-      (a) => a.sentiment === "positive",
-    ).length;
-    const negative = analyzedNews.filter(
-      (a) => a.sentiment === "negative",
-    ).length;
-    const neutral = analyzedNews.filter(
-      (a) => a.sentiment === "neutral",
-    ).length;
     const sentimentSummary = {
-      score:
-        analyzedNews.length > 0
-          ? (positive - negative) / analyzedNews.length
-          : 0,
-      confidence:
-        analyzedNews.length > 0
-          ? (Math.abs(positive - negative) / analyzedNews.length) * 100
-          : 0,
+      score: analyzedNews.length > 0 ? (positive - negative) / analyzedNews.length : 0,
+      confidence: analyzedNews.length > 0 ? (Math.abs(positive - negative) / analyzedNews.length) * 100 : 0,
       positive,
       negative,
       neutral,
       reasoning: `${positive} bullish news vs ${negative} bearish news`,
     };
+
     log(`\n  Positive: ${positive} articles`);
     log(`  Negative: ${negative} articles`);
     log(`  Neutral: ${neutral} articles`);
@@ -130,23 +127,29 @@ async function main() {
     log(`  Sentiment: ${sentimentSummary.score > 0 ? "BULLISH" : "BEARISH"}`);
 
     // ==========================================
-    // PHASE 5: Technical Analysis
+    // PHASE 5: Technical Analysis (real data + multi-timeframe confirmation)
     // ==========================================
     log("\n📈 PHASE 5: Technical Analysis...");
 
-    // Mock price data for demo (in production, fetch from API)
     let mockPrices;
+    let technicalAnalysis;
     try {
-      mockPrices = await getHistoricalCloses("NIFTY 50", 90);
-      log(`✅ Fetched ${mockPrices.length} real NIFTY closing prices`);
-    } catch (error) {
-      log(
-        `⚠️ Real price fetch failed (${error.message}), falling back to insufficient-data state`,
-      );
-      mockPrices = [];
-    }
+      const { dailyCloses, weeklyCloses } = await getMultiTimeframeCloses("NIFTY 50", 90, 450);
+      mockPrices = dailyCloses;
+      log(`✅ Fetched ${dailyCloses.length} daily + ${weeklyCloses.length} weekly NIFTY closes`);
 
-    const technicalAnalysis = TechnicalIndicators.analyzeTechnicals(mockPrices);
+      const dailyAnalysis = TechnicalIndicators.analyzeTechnicals(mockPrices);
+      const weeklyAnalysis = TechnicalIndicators.analyzeWeeklyTrend(weeklyCloses);
+      technicalAnalysis = TechnicalIndicators.applyMultiTimeframeConfirmation(dailyAnalysis, weeklyAnalysis);
+
+      if (technicalAnalysis.multiTimeframe?.applied) {
+        log(`  📅 Weekly trend: ${technicalAnalysis.multiTimeframe.weeklySignal} (agreement: ${technicalAnalysis.multiTimeframe.agreed})`);
+      }
+    } catch (error) {
+      log(`⚠️ Real price fetch failed (${error.message}), falling back to insufficient-data state`);
+      mockPrices = [];
+      technicalAnalysis = { status: "INSUFFICIENT_DATA" };
+    }
 
     if (technicalAnalysis.status === "INSUFFICIENT_DATA") {
       log("⚠️ Insufficient price data for technical analysis");
@@ -168,24 +171,50 @@ async function main() {
     }
 
     // ==========================================
-    // PHASE 6: Call Options Signal
+    // PHASE 6: Call/Put Option Signal (with real premium lookup)
     // ==========================================
-    log("\n📞 PHASE 6: Call Option Signal Generation...");
+    log("\n📞 PHASE 6: Option Signal Generation...");
 
-    const currentNiftyPrice = mockPrices[mockPrices.length - 1];
+    const currentNiftyPrice = mockPrices.length > 0 ? mockPrices[mockPrices.length - 1] : null;
 
-    const callSignal = CallOptionsSignal.generateOptionSignal(
-      technicalAnalysis,
-      sentimentSummary,
-      currentNiftyPrice,
-    );
+    const callSignal =
+      technicalAnalysis.status === "INSUFFICIENT_DATA" || currentNiftyPrice === null
+        ? { action: "NO_ACTION", reason: "Insufficient technical/price data" }
+        : CallOptionsSignal.generateOptionSignal(technicalAnalysis, sentimentSummary, currentNiftyPrice);
 
-    if (callSignal.action === "BUY_CALL") {
-      log("\n✅ CALL OPTION BUY SIGNAL:");
+    if (callSignal.action === "BUY_CALL" || callSignal.action === "BUY_PUT") {
+      // Try to replace the theoretical Black-Scholes premium with the REAL live
+      // market premium from NSE's free option chain.
+      try {
+        const optionType = callSignal.action === "BUY_PUT" ? "PE" : "CE";
+        const nseExpiryFormat = toNseExpiryFormat(callSignal.expiryDate);
+
+        const realData = await getRealOptionPremium("NIFTY", callSignal.strikePrice, optionType, nseExpiryFormat);
+
+        if (realData) {
+          const realPremium = realData.lastPrice;
+          callSignal.estimatedPremium = realPremium;
+          callSignal.targetPrice = parseFloat((realPremium * 1.15).toFixed(2));
+          callSignal.stopLoss = parseFloat((realPremium * 0.9).toFixed(2));
+          callSignal.impliedVolatility = realData.impliedVolatility;
+          callSignal.openInterest = realData.openInterest;
+          callSignal.premiumSource = "LIVE_MARKET";
+          log(`  💰 Using REAL market premium: ₹${realPremium}`);
+        } else {
+          callSignal.premiumSource = "ESTIMATED";
+          log(`  ⚠️ Strike ${callSignal.strikePrice}${optionType} not found in real chain, using theoretical estimate`);
+        }
+      } catch (error) {
+        callSignal.premiumSource = "ESTIMATED";
+        log(`  ⚠️ Real premium lookup failed (${error.message}), using theoretical estimate`);
+      }
+
+      const typeLabel = callSignal.action === "BUY_PUT" ? "🔻 PUT OPTION BUY SIGNAL" : "✅ CALL OPTION BUY SIGNAL";
+      log(`\n${typeLabel}:`);
       log(`  Symbol: ${callSignal.symbol}`);
       log(`  Strike: ₹${callSignal.strikePrice}`);
       log(`  Expiry: ${callSignal.expiryDate}`);
-      log(`  Premium: ₹${callSignal.estimatedPremium}`);
+      log(`  Premium: ₹${callSignal.estimatedPremium} (${callSignal.premiumSource})`);
       log(`  Target: ₹${callSignal.targetPrice}`);
       log(`  Stop Loss: ₹${callSignal.stopLoss}`);
       log(`  Confidence: ${callSignal.confidence}%`);
@@ -194,7 +223,7 @@ async function main() {
         log(`    • ${r}`);
       });
     } else {
-      log(`\n⏸️ No call option signal: ${callSignal.reason}`);
+      log(`\n⏸️ No option signal: ${callSignal.reason}`);
     }
 
     // ==========================================
@@ -204,8 +233,9 @@ async function main() {
     log("\n" + riskManager.formatRiskParameters());
 
     let tradeApproved = false;
+    const isActionableSignal = callSignal.action === "BUY_CALL" || callSignal.action === "BUY_PUT";
 
-    if (callSignal.action === "BUY_CALL") {
+    if (isActionableSignal) {
       const validation = riskManager.validateTrade(
         {
           symbol: callSignal.symbol,
@@ -236,7 +266,6 @@ async function main() {
     let orderResult = null;
 
     if (tradeApproved) {
-      // Authenticate
       const authSuccess = await growwTrader.authenticate();
       if (!authSuccess) {
         log("⚠️ Groww API not available (using simulation)");
@@ -252,7 +281,6 @@ async function main() {
         log(`  Quantity: ${orderResult.quantity}`);
         log(`  Price: ₹${orderResult.price}`);
 
-        // Record trade
         riskManager.recordTrade({
           symbol: callSignal.symbol,
           quantity: 1,
@@ -269,12 +297,12 @@ async function main() {
     // PHASE 9: Save to Database
     // ==========================================
     log("\n💾 PHASE 9: Saving signals to database...");
-    db.saveSignal("NIFTY", niftySignal);
-    db.saveSignal("SENSEX", sensexSignal);
+    await db.saveSignal("NIFTY", niftySignal);
+    await db.saveSignal("SENSEX", sensexSignal);
 
-    if (callSignal.action === "BUY_CALL" && orderResult?.success) {
-      db.saveSignal("CALL_OPTION", {
-        direction: "BUY",
+    if (isActionableSignal && orderResult?.success) {
+      await db.saveSignal("CALL_OPTION", {
+        direction: callSignal.action === "BUY_PUT" ? "SELL" : "BUY",
         confidence: callSignal.confidence / 100,
         score: callSignal.confidence / 100,
         reasoning: `${callSignal.symbol} | Premium: ₹${callSignal.estimatedPremium} | Order ID: ${orderResult.orderId}`,
@@ -289,26 +317,31 @@ async function main() {
     if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
       log("\n📱 PHASE 10: Sending Telegram alerts...");
 
-      // NIFTY Alert
       await telegramAlert.sendAlert(niftySignal, "NIFTY");
       log("✅ NIFTY alert sent");
 
-      // SENSEX Alert
       await telegramAlert.sendAlert(sensexSignal, "SENSEX");
       log("✅ SENSEX alert sent");
 
-      // Call Option Alert
-      if (callSignal.action === "BUY_CALL") {
+      if (isActionableSignal) {
         const callAlert = CallOptionsSignal.formatCallOptionMessage(callSignal);
         await telegramAlert.sendAlert(callAlert);
-        log("✅ Call option alert sent");
+        log("✅ Option alert sent");
       }
+
+      await telegramAlert.sendFullSummary({
+        newsCount: analyzedNews.length,
+        sentimentLabel: sentimentSummary.score > 0 ? "BULLISH" : "BEARISH",
+        sentimentScore: sentimentSummary.score,
+        technicalAnalysis: technicalAnalysis,
+        optionSignal: callSignal,
+        orderResult: orderResult,
+      });
+      log("✅ Full summary sent");
 
       log("✅ Alerts sent");
     } else {
-      log(
-        "\n⚠️ Telegram not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)",
-      );
+      log("\n⚠️ Telegram not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)");
     }
 
     // ==========================================
@@ -322,16 +355,11 @@ async function main() {
     log(`  News Articles: ${analyzedNews.length}`);
     log(`  Sentiment: ${sentimentSummary.score > 0 ? "BULLISH" : "BEARISH"}`);
     log(`  Technical Signal: ${technicalAnalysis.signal || "NEUTRAL"}`);
-    log(
-      `  Call Option Signal: ${callSignal.action === "BUY_CALL" ? "✅ BUY" : "⏸️ NO ACTION"}`,
-    );
-    log(
-      `  Order Status: ${orderResult?.success ? "✅ PLACED" : "⏸️ NOT PLACED"}`,
-    );
+    log(`  Option Signal: ${isActionableSignal ? (callSignal.action === "BUY_PUT" ? "🔻 PUT" : "✅ CALL") : "⏸️ NO ACTION"}`);
+    log(`  Order Status: ${orderResult?.success ? "✅ PLACED" : "⏸️ NOT PLACED"}`);
     log(`  Daily Loss: ₹${riskManager.todayLoss}/${riskManager.maxDailyLoss}`);
     log(`  Telegram Alerts: Sent`);
 
-    // Show statistics
     log("\n📈 DATABASE STATISTICS:");
     const stats = await db.getStatistics();
     log(`  Total NIFTY signals: ${stats.nifty.total}`);
@@ -352,7 +380,6 @@ async function main() {
     log(`\n❌ ERROR: ${error.message}`);
     log(error.stack);
 
-    // Send error alert if Telegram is configured
     if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
       try {
         const telegramAlert = new TelegramAlert();
@@ -368,7 +395,6 @@ async function main() {
   }
 }
 
-// Run bot
 if (require.main === module) {
   main();
 }

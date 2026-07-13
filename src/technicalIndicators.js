@@ -1,5 +1,5 @@
 // technicalIndicators.js
-// Calculates technical indicators: RSI, MACD, Bollinger Bands
+// Calculates technical indicators: RSI, MACD, Bollinger Bands, and multi-timeframe confirmation
 
 class TechnicalIndicators {
   /**
@@ -16,7 +16,6 @@ class TechnicalIndicators {
     let gains = 0;
     let losses = 0;
 
-    // Calculate initial gains and losses
     for (let i = 1; i <= period; i++) {
       const diff = prices[i] - prices[i - 1];
       if (diff > 0) {
@@ -29,7 +28,6 @@ class TechnicalIndicators {
     let avgGain = gains / period;
     let avgLoss = losses / period;
 
-    // Calculate for remaining prices
     for (let i = period + 1; i < prices.length; i++) {
       const diff = prices[i] - prices[i - 1];
       if (diff > 0) {
@@ -42,31 +40,23 @@ class TechnicalIndicators {
     }
 
     const rs = avgGain / avgLoss;
-    const rsi = 100 - 100 / (1 + rs);
+    const rsi = 100 - (100 / (1 + rs));
 
     return parseFloat(rsi.toFixed(2));
   }
 
   /**
    * Calculate MACD (Moving Average Convergence Divergence)
-   * @param {number[]} prices - Array of closing prices
-   * @returns {object} { macd, signal, histogram }
    */
   static calculateMACD(prices) {
     if (prices.length < 26) {
       return null;
     }
 
-    // Calculate 12-day EMA
     const ema12 = this.calculateEMA(prices, 12);
-
-    // Calculate 26-day EMA
     const ema26 = this.calculateEMA(prices, 26);
-
-    // MACD line
     const macdLine = ema12 - ema26;
 
-    // Signal line (9-day EMA of MACD)
     const macdValues = [];
     for (let i = 0; i < prices.length; i++) {
       const e12 = this.calculateEMA(prices.slice(0, i + 1), 12);
@@ -80,7 +70,7 @@ class TechnicalIndicators {
     if (signalLine === null) {
       return null;
     }
-    // Histogram
+
     const histogram = macdLine - signalLine;
 
     return {
@@ -92,10 +82,6 @@ class TechnicalIndicators {
 
   /**
    * Calculate Bollinger Bands
-   * @param {number[]} prices - Array of closing prices
-   * @param {number} period - Default 20
-   * @param {number} stdDev - Standard deviations (default 2)
-   * @returns {object} { upper, middle, lower }
    */
   static calculateBollingerBands(prices, period = 20, stdDev = 2) {
     if (prices.length < period) {
@@ -103,11 +89,7 @@ class TechnicalIndicators {
     }
 
     const recentPrices = prices.slice(-period);
-
-    // Calculate SMA (middle band)
     const sma = recentPrices.reduce((a, b) => a + b, 0) / recentPrices.length;
-
-    // Calculate standard deviation
     const variance =
       recentPrices.reduce((sum, price) => sum + Math.pow(price - sma, 2), 0) /
       recentPrices.length;
@@ -122,15 +104,11 @@ class TechnicalIndicators {
 
   /**
    * Calculate Simple Moving Average
-   * @param {number[]} prices - Array of closing prices
-   * @param {number} period - Period for SMA
-   * @returns {number} SMA value
    */
   static calculateSMA(prices, period) {
     if (prices.length < period) {
       return null;
     }
-
     const recentPrices = prices.slice(-period);
     return (
       recentPrices.reduce((a, b) => a + b, 0) / recentPrices.length
@@ -139,9 +117,6 @@ class TechnicalIndicators {
 
   /**
    * Calculate Exponential Moving Average
-   * @param {number[]} prices - Array of closing prices
-   * @param {number} period - Period for EMA
-   * @returns {number} EMA value
    */
   static calculateEMA(prices, period) {
     if (prices.length < period) {
@@ -159,7 +134,7 @@ class TechnicalIndicators {
   }
 
   /**
-   * Analyze technical indicators for signal
+   * Analyze technical indicators for signal (daily timeframe)
    * @param {number[]} prices - Array of closing prices
    * @returns {object} Technical analysis result
    */
@@ -182,7 +157,6 @@ class TechnicalIndicators {
     let sellVotes = 0;
     const reasons = [];
 
-    // RSI Analysis
     if (rsi < 30) {
       buyVotes++;
       reasons.push(`RSI oversold: ${rsi}`);
@@ -191,7 +165,6 @@ class TechnicalIndicators {
       reasons.push(`RSI overbought: ${rsi}`);
     }
 
-    // MACD Analysis
     if (macd && macd.histogram > 0 && macd.macd > macd.signal) {
       buyVotes++;
       reasons.push("MACD bullish crossover");
@@ -200,7 +173,6 @@ class TechnicalIndicators {
       reasons.push("MACD bearish crossover");
     }
 
-    // Bollinger Bands Analysis
     if (currentPrice < bb.lower) {
       buyVotes++;
       reasons.push("Price below lower BB band");
@@ -209,7 +181,6 @@ class TechnicalIndicators {
       reasons.push("Price above upper BB band");
     }
 
-    // Moving Average Analysis
     if (sma20 > sma50) {
       buyVotes++;
       reasons.push("SMA20 > SMA50 (bullish trend)");
@@ -223,11 +194,7 @@ class TechnicalIndicators {
     if (buyVotes > sellVotes) signal = "BUY";
     else if (sellVotes > buyVotes) signal = "SELL";
 
-    // Confidence reflects how one-sided the votes are, out of 4 possible indicators
-    const confidence =
-      totalVotes > 0
-        ? Math.round((Math.max(buyVotes, sellVotes) / 4) * 100)
-        : 0;
+    const confidence = totalVotes > 0 ? Math.round((Math.max(buyVotes, sellVotes) / 4) * 100) : 0;
 
     return {
       signal,
@@ -239,6 +206,87 @@ class TechnicalIndicators {
       sma50,
       currentPrice,
       reasons,
+    };
+  }
+
+  /**
+   * Analyze the WEEKLY timeframe trend, using a simple SMA10 vs SMA20 crossover
+   * on weekly closing prices. This is intentionally simpler than the daily
+   * analysis — its only job is to answer "what's the higher-timeframe bias?"
+   * @param {number[]} weeklyPrices - weekly closing prices, oldest to newest
+   * @returns {object} { signal: 'BUY'|'SELL'|'HOLD', status, sma10, sma20 }
+   */
+  static analyzeWeeklyTrend(weeklyPrices) {
+    if (!weeklyPrices || weeklyPrices.length < 20) {
+      return {
+        status: "INSUFFICIENT_DATA",
+        signal: "HOLD",
+        message: "Need at least 20 weekly bars for a meaningful weekly trend read",
+      };
+    }
+
+    const sma10 = parseFloat(this.calculateSMA(weeklyPrices, 10));
+    const sma20 = parseFloat(this.calculateSMA(weeklyPrices, 20));
+
+    let signal = "HOLD";
+    if (sma10 > sma20) signal = "BUY";
+    else if (sma10 < sma20) signal = "SELL";
+
+    return { status: "OK", signal, sma10, sma20 };
+  }
+
+  /**
+   * MULTI-TIMEFRAME CONFIRMATION: combines the daily technical signal with the
+   * weekly trend bias.
+   * - If both agree -> confidence is boosted (higher-timeframe confirmation)
+   * - If they disagree -> the daily signal is downgraded to HOLD, since trading
+   *   against the dominant weekly trend is a lower-probability setup. This is a
+   *   dampener, not a hard veto: on the NEXT run, if the daily signal flips to
+   *   agree with the weekly trend, it will fire normally.
+   * @param {object} dailyAnalysis - result of analyzeTechnicals()
+   * @param {object} weeklyAnalysis - result of analyzeWeeklyTrend()
+   * @returns {object} dailyAnalysis, adjusted with multi-timeframe context
+   */
+  static applyMultiTimeframeConfirmation(dailyAnalysis, weeklyAnalysis) {
+    if (dailyAnalysis.status === "INSUFFICIENT_DATA" || weeklyAnalysis.status === "INSUFFICIENT_DATA") {
+      return {
+        ...dailyAnalysis,
+        multiTimeframe: {
+          applied: false,
+          reason: "Insufficient data for weekly confirmation",
+        },
+      };
+    }
+
+    const agrees = dailyAnalysis.signal === weeklyAnalysis.signal;
+    const bothDirectional = dailyAnalysis.signal !== "HOLD" && weeklyAnalysis.signal !== "HOLD";
+
+    if (bothDirectional && agrees) {
+      // Higher-timeframe confirms the daily signal -> boost confidence
+      const boostedConfidence = Math.min(100, dailyAnalysis.confidence + 15);
+      return {
+        ...dailyAnalysis,
+        confidence: boostedConfidence,
+        reasons: [...dailyAnalysis.reasons, `Weekly trend confirms (SMA10 ${weeklyAnalysis.signal === "BUY" ? ">" : "<"} SMA20)`],
+        multiTimeframe: { applied: true, agreed: true, weeklySignal: weeklyAnalysis.signal },
+      };
+    }
+
+    if (bothDirectional && !agrees) {
+      // Conflict: downgrade to HOLD rather than trade against the dominant trend
+      return {
+        ...dailyAnalysis,
+        signal: "HOLD",
+        confidence: Math.round(dailyAnalysis.confidence / 2),
+        reasons: [...dailyAnalysis.reasons, `Downgraded to HOLD: daily signal (${dailyAnalysis.signal}) conflicts with weekly trend (${weeklyAnalysis.signal})`],
+        multiTimeframe: { applied: true, agreed: false, weeklySignal: weeklyAnalysis.signal },
+      };
+    }
+
+    // Weekly trend itself is flat/HOLD - no strong higher-timeframe opinion either way
+    return {
+      ...dailyAnalysis,
+      multiTimeframe: { applied: true, agreed: null, weeklySignal: weeklyAnalysis.signal },
     };
   }
 }

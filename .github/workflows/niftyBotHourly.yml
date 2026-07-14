@@ -2,10 +2,11 @@ name: NIFTY/SENSEX Bot - Hourly During Market Hours
 
 on:
   schedule:
-    # Runs at :45 past the hour, 3 AM - 9 AM UTC, Mon-Fri
-    # = 9:15 AM - 3:15 PM IST, Monday-Friday (NSE trading hours)
+    # Runs every 30 minutes from 9 AM to 3 PM IST, Mon-Fri
+    # = 3:30 AM - 9:30 PM UTC (cron uses UTC), Monday-Friday
+    # IST is UTC+5:30, so 9 AM IST = 3:30 AM UTC, 3 PM IST = 9:30 AM UTC
     # NOTE: GitHub Actions cron can be delayed by a few minutes during high load
-    - cron: '15,45 3-9 * * 1-5'
+    - cron: '0,30 3-9 * * 1-5'
 
   workflow_dispatch: {}  # allows manual "Run workflow" button for testing
 

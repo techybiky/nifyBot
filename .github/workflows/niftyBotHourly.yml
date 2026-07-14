@@ -5,7 +5,8 @@ on:
     # Runs at :45 past the hour, 3 AM - 9 AM UTC, Mon-Fri
     # = 9:15 AM - 3:15 PM IST, Monday-Friday (NSE trading hours)
     # NOTE: GitHub Actions cron can be delayed by a few minutes during high load
-    - cron: '45 3-9 * * 1-5'
+    - cron: '15,45 3-9 * * 1-5'
+
   workflow_dispatch: {}  # allows manual "Run workflow" button for testing
 
 jobs:

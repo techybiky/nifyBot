@@ -33,6 +33,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+<<<<<<< HEAD
+      - name: Check if within market hours
+        id: check_time
+        run: |
+          CURRENT_UTC=$(date -u +"%H:%M")
+          CURRENT_IST=$(TZ='Asia/Kolkata' date +"%H:%M")
+          echo "Current IST time: $CURRENT_IST"
+          echo "Current UTC time: $CURRENT_UTC"
+          
+          # Check if time is between 9 AM and 3 PM IST
+          # 9 AM IST = 3:30 AM UTC, 3 PM IST = 9:30 AM UTC
+          if [[ "$CURRENT_UTC" > "03:30" ]] && [[ "$CURRENT_UTC" < "09:31" ]]; then
+            echo "Within market hours"
+            echo "run_bot=true" >> $GITHUB_OUTPUT
+          else
+            echo "Outside market hours"
+            echo "run_bot=false" >> $GITHUB_OUTPUT
+          fi
+=======
       - name: Telegram pre-flight check
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -58,24 +77,7 @@ jobs:
             exit 1
           fi
           echo "✅ Telegram pre-flight check passed - you should have received a test message just now"
-
-      - name: Check if within market hours
-        id: check_time
-        run: |
-          CURRENT_UTC=$(date -u +"%H:%M")
-          CURRENT_IST=$(TZ='Asia/Kolkata' date +"%H:%M")
-          echo "Current IST time: $CURRENT_IST"
-          echo "Current UTC time: $CURRENT_UTC"
-          
-          # Check if time is between 9 AM and 3 PM IST
-          # 9 AM IST = 3:30 AM UTC, 3 PM IST = 9:30 AM UTC
-          if [[ "$CURRENT_UTC" > "03:30" ]] && [[ "$CURRENT_UTC" < "09:31" ]]; then
-            echo "Within market hours"
-            echo "run_bot=true" >> $GITHUB_OUTPUT
-          else
-            echo "Outside market hours"
-            echo "run_bot=false" >> $GITHUB_OUTPUT
-          fi
+>>>>>>> cdc4543 (a big changes)
 
       - name: Run bot
         if: steps.check_time.outputs.run_bot == 'true'

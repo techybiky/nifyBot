@@ -13,6 +13,32 @@ const { NseIndia } = require('stock-nse-india');
 const nseIndia = new NseIndia();
 
 /**
+ * Retry a function with exponential backoff. Added after observing NSE
+ * requests intermittently return 403 from GitHub Actions' shared IP pool -
+ * this worked reliably on many prior runs, so it's likely transient
+ * rate-limiting rather than a permanent block. Retries give a failed
+ * request a few more chances before we give up and fall back gracefully.
+ * @param {Function} fn - async function to retry
+ * @param {number} maxAttempts
+ * @param {number} baseDelayMs
+ */
+async function retryWithBackoff(fn, maxAttempts = 3, baseDelayMs = 2000) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) {
+        const delay = baseDelayMs * attempt; // 2s, 4s, 6s...
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError;
+}
+
+/**
  * Fetch real historical daily closing prices for an NSE index.
  * @param {string} indexName - e.g. 'NIFTY 50'
  * @param {number} days - how many calendar days back to fetch (default 90, comfortably
@@ -24,12 +50,14 @@ async function getHistoricalCloses(indexName = 'NIFTY 50', days = 90, symbolType
   const start = new Date();
   start.setDate(start.getDate() - days);
 
-  const response = await nseIndia.getEquityChartHistoricalData(
-    indexName,
-    { start, end },
-    undefined,   // token - auto-fetched internally
-    symbolType,     // symbolType
-    'D',         // chartType - Daily
+  const response = await retryWithBackoff(() =>
+    nseIndia.getEquityChartHistoricalData(
+      indexName,
+      { start, end },
+      undefined,   // token - auto-fetched internally
+      symbolType,     // symbolType
+      'D',         // chartType - Daily
+    )
   );
 
   if (!response || !response.status || !Array.isArray(response.data)) {
@@ -52,12 +80,14 @@ async function getHistoricalClosesWithDate(indexName = 'NIFTY 50', days = 90, sy
   const start = new Date();
   start.setDate(start.getDate() - days);
 
-  const response = await nseIndia.getEquityChartHistoricalData(
-    indexName,
-    { start, end },
-    undefined,
-    symbolType,
-    'D',
+  const response = await retryWithBackoff(() =>
+    nseIndia.getEquityChartHistoricalData(
+      indexName,
+      { start, end },
+      undefined,
+      symbolType,
+      'D',
+    )
   );
 
   if (!response || !response.status || !Array.isArray(response.data)) {
@@ -91,12 +121,14 @@ async function getMultiTimeframeCloses(indexName = 'NIFTY 50', dailyDays = 90, w
   const start = new Date();
   start.setDate(start.getDate() - weeklyLookbackDays);
 
-  const response = await nseIndia.getEquityChartHistoricalData(
-    indexName,
-    { start, end },
-    undefined,
-    symbolType,
-    'D',
+  const response = await retryWithBackoff(() =>
+    nseIndia.getEquityChartHistoricalData(
+      indexName,
+      { start, end },
+      undefined,
+      symbolType,
+      'D',
+    )
   );
 
   if (!response || !response.status || !Array.isArray(response.data)) {
@@ -133,4 +165,4 @@ function getIsoWeekKey(date) {
   return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
 }
 
-module.exports = { getHistoricalCloses, getHistoricalClosesWithDate, getMultiTimeframeCloses }; 
+module.exports = { getHistoricalCloses, getHistoricalClosesWithDate, getMultiTimeframeCloses };

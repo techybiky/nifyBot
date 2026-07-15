@@ -1,0 +1,50 @@
+name: Fast Breaking News Scanner
+
+on:
+  schedule:
+    # Every 5 minutes, 3:45 AM - 10:00 AM UTC = 9:15 AM - 3:30 PM IST, Mon-Fri
+    # (5 min is the practical minimum GitHub Actions schedule reliably supports)
+    - cron: '*/5 3-9 * * 1-5'
+  workflow_dispatch: {}
+
+concurrency:
+  group: fast-news-scan
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run fast news scan
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node src/runFastNewsScan.js
+
+      - name: Commit updated seen-headlines back to repo
+        if: always()
+        run: |
+          git config user.name "nifty-bot[bot]"
+          git config user.email "nifty-bot[bot]@users.noreply.github.com"
+          git add data/seen-headlines.json -f
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update seen headlines [skip ci]"
+            git push
+          fi

@@ -240,7 +240,7 @@ async function main() {
     try {
       const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
       const hourIST = nowIST.getHours();
-      const stockBatch = getStockBatch(10, hourIST);
+      const stockBatch = getStockBatch(5, hourIST);
       log(`  Scanning batch: ${stockBatch.map((s) => s.symbol).join(', ')}`);
 
       const allStockResults = await analyzeStockBatch(stockBatch, analyzedNews, 500);

@@ -1,13 +1,18 @@
-name: NIFTY/SENSEX Bot - Hourly During Market Hours
+name: NIFTY/SENSEX Bot - Every 30 Min During Market Hours
 
 on:
   schedule:
-    # Runs every 30 minutes from 9 AM to 3 PM IST, Mon-Fri
-    # = 3:30 AM - 9:30 AM UTC, Monday-Friday
-    # IST is UTC+5:30
-    - cron: '0,30 3-10 * * 1-5'
+    # Fires at :15 and :45 past the hour, 3 AM - 9 AM UTC, Mon-Fri
+    # = every 30 min from 9:15 AM to 3:15 PM IST, Monday-Friday (NSE hours)
+    # NOTE: GitHub Actions cron can be delayed by a few minutes during high load
+    - cron: '15,45 3-9 * * 1-5'
+  workflow_dispatch: {}
 
-  workflow_dispatch: {}  # allows manual "Run workflow" button for testing
+# Prevents overlapping runs from ever piling up - if a new run starts while
+# one is still in progress, the old one is cancelled rather than both running.
+concurrency:
+  group: nifty-bot-run
+  cancel-in-progress: true
 
 jobs:
   run-bot:
@@ -27,6 +32,32 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Telegram pre-flight check
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          echo "Checking Telegram secrets are set (not their values)..."
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN secret is EMPTY or not set in GitHub"
+            exit 1
+          fi
+          if [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::error::TELEGRAM_CHAT_ID secret is EMPTY or not set in GitHub"
+            exit 1
+          fi
+          echo "Both secrets are present. Sending a real test ping to confirm they actually work..."
+          RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            -d chat_id="$TELEGRAM_CHAT_ID" \
+            -d text="🔧 GitHub Actions pre-flight check - if you see this, secrets are correctly configured")
+          echo "Telegram API response: $RESPONSE"
+          OK=$(echo "$RESPONSE" | grep -o '"ok":true' || true)
+          if [ -z "$OK" ]; then
+            echo "::error::Telegram API did NOT return ok:true - check the response above for the real error (wrong token, bot blocked, wrong chat_id, etc.)"
+            exit 1
+          fi
+          echo "✅ Telegram pre-flight check passed - you should have received a test message just now"
 
       - name: Check if within market hours
         id: check_time

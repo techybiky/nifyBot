@@ -1,11 +1,14 @@
 // callOptionsSignal.js
 // Generates call AND put option trading signals
+// Features:
+// - CALL options (bullish trades)
+// - PUT options (bearish trades)
+// - Black-Scholes premium estimation
+// - SEBI-compliant expiry dates (Sept 2025 update)
+// - Agreement validation (requires technical + sentiment consensus)
+// - Professional Telegram formatting with legal disclaimer
 
 class CallOptionsSignal {
-  /**
-   * Get weekly expiry date (next Thursday)
-   * @returns {string} Date in DDMMMYY format (e.g., 18JUL26)
-   */
   /**
    * Get weekly expiry date for a given index.
    * IMPORTANT: Since 1 September 2025, SEBI mandated exchange-specific expiry
@@ -368,6 +371,72 @@ ${optionSignal.reasons.map((r) => `• ${r}`).join("\n")}
 ━━━━━━━━━━━━━━━━━━━━
 ⚠️ <b>Disclaimer:</b> This is an automated, algorithm-generated signal shared for educational and informational purposes only. It is NOT investment advice. The author is not a SEBI-registered Investment Adviser or Research Analyst. Trading in futures & options carries a high risk of financial loss and is not suitable for all investors. Past performance of this or any strategy does not guarantee future results. Please consult a SEBI-registered financial advisor and conduct your own due diligence before making any investment decision. Trade at your own risk.
     `.trim();
+  }
+
+  /**
+   * Format a simplified message for option signals
+   */
+  static formatSimpleOptionMessage(optionSignal) {
+    if (optionSignal.action === "NO_ACTION") {
+      return `⏸️ No signal: ${optionSignal.reason}`;
+    }
+
+    const isPut = optionSignal.action === "BUY_PUT";
+    const emoji = isPut ? "🔻" : "📈";
+    const type = isPut ? "PUT" : "CALL";
+
+    return `
+${emoji} <b>${type}</b> Signal
+Symbol: <code>${optionSignal.symbol}</code>
+Strike: ₹${optionSignal.strikePrice}
+Premium: ₹${optionSignal.estimatedPremium}
+Target: ₹${optionSignal.targetPrice}
+Stop Loss: ₹${optionSignal.stopLoss}
+Confidence: ${optionSignal.confidence}%
+
+⚠️ <i>Educational purposes only. Not investment advice.</i>
+    `.trim();
+  }
+
+  /**
+   * Validate option signal parameters
+   */
+  static validateSignal(signal) {
+    if (signal.action === "NO_ACTION") {
+      return { valid: true, message: "No action signal" };
+    }
+
+    const errors = [];
+
+    if (!signal.symbol) errors.push("Missing symbol");
+    if (!signal.strikePrice) errors.push("Missing strike price");
+    if (!signal.estimatedPremium || signal.estimatedPremium <= 0) errors.push("Invalid premium");
+    if (!signal.expiryDate) errors.push("Missing expiry date");
+    if (signal.confidence < 0 || signal.confidence > 100) errors.push("Invalid confidence");
+
+    if (errors.length > 0) {
+      return { valid: false, message: errors.join(", ") };
+    }
+
+    return { valid: true, message: "Signal valid" };
+  }
+
+  /**
+   * Get signal statistics
+   */
+  static getSignalStats(signals = []) {
+    const callSignals = signals.filter(s => s.action === "BUY_CALL").length;
+    const putSignals = signals.filter(s => s.action === "BUY_PUT").length;
+    const noActionSignals = signals.filter(s => s.action === "NO_ACTION").length;
+
+    return {
+      totalSignals: signals.length,
+      callSignals,
+      putSignals,
+      noActionSignals,
+      callPercentage: signals.length > 0 ? ((callSignals / signals.length) * 100).toFixed(2) + "%" : "0%",
+      putPercentage: signals.length > 0 ? ((putSignals / signals.length) * 100).toFixed(2) + "%" : "0%",
+    };
   }
 }
 

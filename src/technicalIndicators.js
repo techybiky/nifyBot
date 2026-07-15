@@ -189,12 +189,35 @@ class TechnicalIndicators {
       reasons.push("SMA20 < SMA50 (bearish trend)");
     }
 
+    // SUDDEN MOVE DETECTOR: RSI/MACD/SMA are all slow, multi-day trend
+    // indicators - a single sharp day (e.g. a geopolitical shock) barely
+    // moves them. This check looks at the latest single-day % change
+    // directly and votes strongly if it's a significant move, so the bot
+    // can react same-day to shocks the slower indicators would miss for
+    // several more days.
+    const prevPrice = prices[prices.length - 2];
+    const dayChangePercent = ((currentPrice - prevPrice) / prevPrice) * 100;
+    const SHOCK_THRESHOLD = 1.0; // % move considered a "sudden" single-day move
+
+    if (dayChangePercent <= -SHOCK_THRESHOLD) {
+      sellVotes += 2; // weighted higher - an acute shock is a stronger signal than a slow crossover
+      reasons.push(`Sudden single-day drop: ${dayChangePercent.toFixed(2)}%`);
+    } else if (dayChangePercent >= SHOCK_THRESHOLD) {
+      buyVotes += 2;
+      reasons.push(`Sudden single-day rally: ${dayChangePercent.toFixed(2)}%`);
+    }
+
     const totalVotes = buyVotes + sellVotes;
     let signal = "HOLD";
     if (buyVotes > sellVotes) signal = "BUY";
     else if (sellVotes > buyVotes) signal = "SELL";
 
-    const confidence = totalVotes > 0 ? Math.round((Math.max(buyVotes, sellVotes) / 4) * 100) : 0;
+    // Max possible votes is now 6 (4 standard indicators + 2 from a shock move),
+    // but we keep the confidence SCALE based on 4 (matching prior behavior for
+    // normal days) and simply cap at 100% when a shock pushes it higher -
+    // changing the denominator to 6 would have diluted confidence on every
+    // ordinary, non-shock day.
+    const confidence = totalVotes > 0 ? Math.min(100, Math.round((Math.max(buyVotes, sellVotes) / 4) * 100)) : 0;
 
     return {
       signal,

@@ -26,6 +26,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
@@ -46,5 +47,9 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "chore: update seen headlines [skip ci]"
-            git push
+            for i in 1 2 3; do
+              git pull --rebase origin main && git push && break
+              echo "Push attempt $i failed, retrying..."
+              sleep 3
+            done
           fi

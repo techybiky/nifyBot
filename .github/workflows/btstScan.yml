@@ -1,0 +1,36 @@
+name: BTST Candidates Scan (OI Buildup)
+
+on:
+  schedule:
+    # Fires at 9:40 AM UTC = 3:10 PM IST, Mon-Fri — near market close, once
+    # OI buildup for the day is well established.
+    - cron: '40 9 * * 1-5'
+  workflow_dispatch: {}
+
+concurrency:
+  group: btst-scan
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run BTST scan
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node src/runBtstScan.js

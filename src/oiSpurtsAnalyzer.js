@@ -18,7 +18,12 @@ const MIN_OI_CHANGE_PERCENT = 15; // minimum |pChangeInOI| to be considered a me
 const MIN_VOLUME = 1000; // basic liquidity filter - avoid thinly-traded contracts
 
 /**
- * Fetch and categorize OI spurts contracts into genuine BUY candidates.
+ * Fetch all Long Buildup ("Rise-in-OI-Rise") contracts, filtered by the
+ * liquidity/strength thresholds but NOT deduped by symbol - the raw,
+ * per-contract list. Used both by getBtstCandidates() below (which dedupes
+ * to one contract per symbol) and by btstCompositeScorer.js, which needs to
+ * look up ALL contracts for a specific symbol to find a real tradeable
+ * strike for stocks that composite scoring flagged via other signals.
  *
  * IMPORTANT CORRECTION: only "Rise-in-OI-Rise" (Long Buildup - price up + OI up)
  * represents fresh BUYING activity, whether on a Call or a Put:
@@ -29,9 +34,9 @@ const MIN_VOLUME = 1000; // basic liquidity filter - avoid thinly-traded contrac
  * worthless) - a fundamentally different, margin-heavy strategy than simply
  * buying an option, and was incorrectly used as a "bearish buy" source before.
  *
- * @returns {Promise<{bullish: object[], bearish: object[]}>}
+ * @returns {Promise<{call: object[], put: object[], timestamp: string}>}
  */
-async function getBtstCandidates() {
+async function getLongBuildupContracts() {
   const raw = await nseIndia.getDataByEndpoint('/api/live-analysis-oi-spurts-contracts');
 
   if (!raw || !Array.isArray(raw.data)) {
@@ -43,11 +48,10 @@ async function getBtstCandidates() {
     return entry ? entry[name] : [];
   };
 
-  // Only Long Buildup - genuine fresh buying, split by option type below
   const longBuildup = findCategory('Rise-in-OI-Rise');
 
-  const filterAndDedupe = (contracts, optionType) => {
-    const filtered = contracts.filter(
+  const filterByType = (optionType) =>
+    longBuildup.filter(
       (c) =>
         Math.abs(c.pChangeInOI) >= MIN_OI_CHANGE_PERCENT &&
         c.volume >= MIN_VOLUME &&
@@ -55,26 +59,49 @@ async function getBtstCandidates() {
         c.strikePrice > 0
     );
 
-    // A symbol can appear across multiple strikes - keep only the contract
-    // with the highest volume per symbol (the most liquid/representative one)
-    const bySymbol = new Map();
-    for (const c of filtered) {
-      const existing = bySymbol.get(c.symbol);
-      if (!existing || c.volume > existing.volume) {
-        bySymbol.set(c.symbol, c);
-      }
-    }
-
-    return Array.from(bySymbol.values()).sort(
-      (a, b) => Math.abs(b.pChangeInOI) - Math.abs(a.pChangeInOI)
-    );
-  };
-
   return {
-    bullish: filterAndDedupe(longBuildup, 'Call'),  // fresh call-buying -> BUY CALL
-    bearish: filterAndDedupe(longBuildup, 'Put'),   // fresh put-buying -> BUY PUT
+    call: filterByType('Call'),
+    put: filterByType('Put'),
     timestamp: raw.timestamp,
   };
 }
 
-module.exports = { getBtstCandidates };
+/**
+ * Dedupe a contract list down to one (highest-volume) contract per symbol,
+ * sorted by OI-change strength.
+ */
+function dedupeBySymbol(contracts) {
+  const bySymbol = new Map();
+  for (const c of contracts) {
+    const existing = bySymbol.get(c.symbol);
+    if (!existing || c.volume > existing.volume) {
+      bySymbol.set(c.symbol, c);
+    }
+  }
+  return Array.from(bySymbol.values()).sort(
+    (a, b) => Math.abs(b.pChangeInOI) - Math.abs(a.pChangeInOI)
+  );
+}
+
+/**
+ * Fetch and categorize OI spurts contracts into genuine BUY candidates.
+ *
+ * NOTE: this dedupes to one contract per symbol, and in practice the
+ * contract-level OI-spurts endpoint is dominated by NIFTY index-option
+ * volume, so this alone tends to surface only 1-2 candidates (both NIFTY)
+ * on a typical day. See btstCompositeScorer.js for the multi-indicator,
+ * stock-level replacement that addresses this.
+ *
+ * @returns {Promise<{bullish: object[], bearish: object[]}>}
+ */
+async function getBtstCandidates() {
+  const { call, put, timestamp } = await getLongBuildupContracts();
+
+  return {
+    bullish: dedupeBySymbol(call),  // fresh call-buying -> BUY CALL
+    bearish: dedupeBySymbol(put),   // fresh put-buying -> BUY PUT
+    timestamp,
+  };
+}
+
+module.exports = { getBtstCandidates, getLongBuildupContracts };

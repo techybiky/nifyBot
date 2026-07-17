@@ -61,7 +61,61 @@ class Database {
                   return;
                 }
 
-                resolve();
+                // Create BTST composite-candidate table
+                this.db.run(
+                  `
+                CREATE TABLE IF NOT EXISTS btst_candidates (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  symbol TEXT NOT NULL,
+                  direction TEXT NOT NULL,
+                  composite_score REAL NOT NULL,
+                  confidence REAL NOT NULL,
+                  agreeing_count INTEGER NOT NULL,
+                  macro_multiplier REAL,
+                  market_cap_tier TEXT,
+                  components_json TEXT,
+                  macro_json TEXT,
+                  option_type TEXT,
+                  strike_price REAL,
+                  expiry_date TEXT,
+                  premium REAL,
+                  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  actual_result TEXT,
+                  accuracy_verified BOOLEAN DEFAULT 0
+                )
+              `,
+                  (err) => {
+                    if (err) {
+                      reject(err);
+                      return;
+                    }
+
+                    // CREATE TABLE IF NOT EXISTS only applies on first creation - it
+                    // does NOT retroactively add columns to a table that already
+                    // exists from before a schema change (e.g. market_cap_tier was
+                    // added after btst_candidates already existed on disk). Without
+                    // this, every future schema addition would silently break the
+                    // scheduled workflow the first time it runs against an existing
+                    // committed data/signals.db.
+                    this.migrateBtstCandidatesTable((err) => {
+                      if (err) {
+                        reject(err);
+                        return;
+                      }
+
+                      this.db.run(
+                        `CREATE INDEX IF NOT EXISTS idx_btst_timestamp ON btst_candidates(timestamp)`,
+                        (err) => {
+                          if (err) {
+                            reject(err);
+                            return;
+                          }
+                          resolve();
+                        },
+                      );
+                    });
+                  },
+                );
               },
             );
           },
@@ -230,6 +284,105 @@ class Database {
         } else {
           resolve(rows || []);
         }
+      });
+    });
+  }
+
+  /**
+   * Add any columns to btst_candidates that the current schema expects but
+   * an already-existing table (created before a schema change) doesn't have
+   * yet. SQLite has no "ADD COLUMN IF NOT EXISTS", so this checks
+   * PRAGMA table_info first and only adds what's missing.
+   */
+  migrateBtstCandidatesTable(callback) {
+    const expectedColumns = {
+      market_cap_tier: 'TEXT',
+    };
+
+    this.db.all('PRAGMA table_info(btst_candidates)', (err, rows) => {
+      if (err) {
+        callback(err);
+        return;
+      }
+
+      const existing = new Set((rows || []).map((r) => r.name));
+      const missing = Object.entries(expectedColumns).filter(([name]) => !existing.has(name));
+
+      if (missing.length === 0) {
+        callback(null);
+        return;
+      }
+
+      const addNext = (i) => {
+        if (i >= missing.length) {
+          callback(null);
+          return;
+        }
+        const [name, type] = missing[i];
+        this.db.run(`ALTER TABLE btst_candidates ADD COLUMN ${name} ${type}`, (err) => {
+          if (err) {
+            callback(err);
+            return;
+          }
+          addNext(i + 1);
+        });
+      };
+      addNext(0);
+    });
+  }
+
+  /**
+   * Save a scored BTST candidate (from btstCompositeScorer.js) to the database.
+   */
+  saveBtstCandidate(candidate, macro) {
+    return new Promise((resolve, reject) => {
+      const sql = `
+        INSERT INTO btst_candidates (
+          symbol, direction, composite_score, confidence, agreeing_count,
+          macro_multiplier, market_cap_tier, components_json, macro_json,
+          option_type, strike_price, expiry_date, premium
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+
+      this.db.run(
+        sql,
+        [
+          candidate.symbol,
+          candidate.direction,
+          candidate.finalScore,
+          candidate.confidence,
+          candidate.agreeingCount,
+          candidate.macroMultiplier,
+          candidate.marketCapTier || null,
+          JSON.stringify(candidate.components),
+          JSON.stringify(macro || {}),
+          candidate.contract?.optionType || null,
+          candidate.contract?.strikePrice || null,
+          candidate.contract?.expiryDate || null,
+          candidate.contract?.premium || null,
+        ],
+        (err) => {
+          if (err) reject(err);
+          else resolve();
+        },
+      );
+    });
+  }
+
+  /**
+   * Get recent BTST candidates, optionally filtered by symbol.
+   */
+  getBtstCandidates(limit = 100) {
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT * FROM btst_candidates
+        ORDER BY timestamp DESC
+        LIMIT ?
+      `;
+
+      this.db.all(sql, [limit], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
       });
     });
   }

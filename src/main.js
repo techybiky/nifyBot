@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+const { NseIndia } = require("stock-nse-india");
 const NewsProcessor = require("./newsProcessor");
 const SignalGenerator = require("./signalGenerator");
 const Database = require("./database");
@@ -70,6 +71,28 @@ async function main() {
     log("\n📊 PHASE 1: Initializing database...");
     await db.initialize();
     log("✅ Database initialized");
+
+    // ==========================================
+    // MARKET HOURS CHECK
+    // ==========================================
+    // The scheduled GitHub Actions workflow only fires 9:15 AM-3:15 PM IST,
+    // but a manual `npm start` has no such guard - without this check it will
+    // happily run the full pipeline (including a live Groww order attempt in
+    // PHASE 8) hours after close, against a stale last-close technical setup.
+    log("\n🕐 Checking market status...");
+    try {
+      const nseIndia = new NseIndia();
+      const marketStatus = await nseIndia.getMarketStatus();
+      const capitalMarket = marketStatus?.marketState?.find((m) => m.market === "Capital Market");
+
+      if (capitalMarket && capitalMarket.marketStatus !== "Open") {
+        log(`⏸️ Capital Market is ${capitalMarket.marketStatus} (${capitalMarket.marketStatusMessage}) - skipping run`);
+        return;
+      }
+      log("✅ Capital Market is Open - proceeding");
+    } catch (error) {
+      log(`⚠️ Could not verify market status (${error.message}) - proceeding anyway`);
+    }
 
     // ==========================================
     // PHASE 2: Fetch News
@@ -392,10 +415,12 @@ async function main() {
     log(`  Total NIFTY signals: ${stats.nifty.total}`);
     log(`  NIFTY BUY signals: ${stats.nifty.buy}`);
     log(`  NIFTY SELL signals: ${stats.nifty.sell}`);
+    log(`  NIFTY HOLD signals: ${stats.nifty.hold}`);
     log(`  NIFTY accuracy: ${(stats.nifty.accuracy * 100).toFixed(2)}%`);
     log(`\n  Total SENSEX signals: ${stats.sensex.total}`);
     log(`  SENSEX BUY signals: ${stats.sensex.buy}`);
     log(`  SENSEX SELL signals: ${stats.sensex.sell}`);
+    log(`  SENSEX HOLD signals: ${stats.sensex.hold}`);
     log(`  SENSEX accuracy: ${(stats.sensex.accuracy * 100).toFixed(2)}%`);
 
     log("\n" + "=".repeat(70));
